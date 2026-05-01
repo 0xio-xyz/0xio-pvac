@@ -2,9 +2,19 @@
 
 PVAC-HFHE privacy primitives for Octra Network. FHE encryption, range proofs, bound proofs, and cipher arithmetic for building privacy-aware DApps.
 
+**Browser only (WASM).** This package runs in browsers, browser extensions, and web workers. For native mobile (React Native) or desktop (Tauri/Rust), use the `pvac-rs` crate directly via FFI or as a Rust dependency.
+
+| Platform | Use |
+|---|---|
+| Web DApps / Browser | `@0xio/pvac` (this package) |
+| Browser Extension | `@0xio/pvac` or bundled WASM directly |
+| React Native (mobile) | `pvac-rs` native FFI (.so/.dylib) |
+| Tauri / Desktop | `pvac-rs` Rust crate |
+| Node.js server | Not supported (no WASM threading) |
+
 ## When to Use
 
-Use this package if you're building a DApp that needs to work with encrypted balances on Octra — private DEX, lending protocol, or any contract that operates on FHE ciphertexts.
+Use this package if you're building a **browser-based** DApp that needs to work with encrypted balances on Octra — private DEX, lending protocol, or any contract that operates on FHE ciphertexts.
 
 For basic wallet operations (send, receive, check balance), use `@0xio/sdk` instead.
 
@@ -111,10 +121,11 @@ const rangeProof = await ctx.makeRangeProofParallel(newPoolOCT, newPoolValue);
 
 ## Requirements
 
-- Browser with WebAssembly support
-- SharedArrayBuffer + COOP/COEP headers (for rayon parallelism)
-- ~100MB RAM for PVAC context
-- pvac-rs WASM module (pvac_rs_bg.wasm + pvac_rs.js)
+- **Browser only** — Chrome, Firefox, Edge, Brave (no Node.js, no React Native)
+- WebAssembly support (all modern browsers)
+- SharedArrayBuffer + COOP/COEP headers (for rayon thread pool parallelism)
+- ~100MB RAM for PVAC context initialization
+- WASM module is bundled (3.2MB) — no external setup needed
 
 ## License
 
