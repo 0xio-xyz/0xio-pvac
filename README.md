@@ -119,6 +119,31 @@ const rangeProof = await ctx.makeRangeProofParallel(newPoolOCT, newPoolValue);
 // 5. Submit to DEX contract with all proofs
 ```
 
+## FAQ
+
+### Why no `ct_sub_const(cipher, amount)`?
+
+Some contracts expect `fhe_sub_const` — subtracting a public constant from an encrypted cipher. We don't expose a separate `ct_sub_const` because `ctSub` already handles this:
+
+```typescript
+// Subtracting a public amount from an encrypted balance:
+const amountCipher = ctx.encrypt(BigInt(amount));     // encrypt the constant
+const newBalance = ctx.ctSub(currentCipher, amountCipher); // subtract ciphers
+
+// Then prove non-negative:
+const proof = ctx.makeRangeProof(newBalance, expectedValue);
+```
+
+This is mathematically identical to `ct_sub_const`. Both produce `enc(balance - amount)`. The range proof verifies the decrypted value is ≥ 0 regardless of how the cipher was constructed.
+
+### Approval popup shows amount ≠ 0?
+
+When calling `sdk.callContract()`, the popup shows two numbers:
+- **Amount** = native OCT sent to the contract (set `amount: 0` if none)
+- **Fee** = OU / gas fee (typically 0.001-0.01 OCT)
+
+If you see a non-zero amount and expect 0, check your `callContract({ amount: 0 })` param.
+
 ## Requirements
 
 - **Browser only** — Chrome, Firefox, Edge, Brave (no Node.js, no React Native)
