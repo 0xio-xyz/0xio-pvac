@@ -1,8 +1,8 @@
 # @0xio/pvac
 
-PVAC-HFHE privacy primitives for Octra Network. FHE encryption, range proofs, bound proofs, and cipher arithmetic for building privacy-aware DApps.
+Privacy primitives for Octra Network. FHE encryption, stealth addresses, confidential tokens, compliance proofs, Groth16 ZK verification, and Web Worker offloading.
 
-**Browser only (WASM).** This package runs in browsers, browser extensions, and web workers. For native mobile (React Native) or desktop (Tauri/Rust), use the `pvac-rs` crate directly via FFI or as a Rust dependency.
+**Browser only (WASM).** Runs in browsers, extensions, and web workers.
 
 | Platform | Use |
 |---|---|
@@ -10,13 +10,6 @@ PVAC-HFHE privacy primitives for Octra Network. FHE encryption, range proofs, bo
 | Browser Extension | `@0xio/pvac` or bundled WASM directly |
 | React Native (mobile) | `pvac-rs` native FFI (.so/.dylib) |
 | Tauri / Desktop | `pvac-rs` Rust crate |
-| Node.js server | Not supported (no WASM threading) |
-
-## When to Use
-
-Use this package if you're building a **browser-based** DApp that needs to work with encrypted balances on Octra — private DEX, lending protocol, or any contract that operates on FHE ciphertexts.
-
-For basic wallet operations (send, receive, check balance), use `@0xio/sdk` instead.
 
 ## Installation
 
@@ -26,131 +19,321 @@ npm install @0xio/pvac
 
 WASM module is bundled — no extra setup needed.
 
+## Modules
+
+| Module | Description | Speed |
+|---|---|---|
+| `PvacContext` | Core FHE: encrypt, decrypt, cipher arithmetic, proofs | varies |
+| `PrivateTransfer` | One-call encrypt/decrypt with progress callbacks | encrypt ~1s, decrypt 30-60s |
+| `ConfidentialBalance` | Fetch + decrypt + cache + format encrypted balances | ~2s (cached: instant) |
+| `StealthAddress` | Stealth payments: generate, send, scan, claim | ~5ms per output |
+| `ConfidentialToken` | ORC20 token with encrypted balances | ~1s per tx |
+| `ComplianceProof` | Prove balance ≥/≤/in-range without revealing value | 30-60s |
+| `ProofWorker` | Web Worker offload — proofs don't freeze UI | same, off-thread |
+| `Groth16` | BN254 ZK proof generation + on-chain verification | ~2-5s |
+
+---
+
 ## Quick Start
 
 ```typescript
-import { PvacContext, initPvac, buildEncryptPayload, buildDecryptPayload } from '@0xio/pvac';
+import { PvacContext, initPvac, PrivateTransfer } from '@0xio/pvac';
 
-// 1. Load WASM (bundled in the package)
+// 1. Load WASM
 const wasm = await initPvac();
 
-// 2. Create context (32-byte seed from wallet key derivation)
+// 2. Create context from wallet seed
 const ctx = await PvacContext.create(seed, wasm, {
   preWarm: true,
   threads: navigator.hardwareConcurrency,
 });
 
-// 3. Encrypt a value
-const result = ctx.fullEncrypt(1000000); // 1 OCT
-console.log(result.cipherB64);  // hfhe_v1|<base64>
-console.log(result.boundProofEncoded); // zkzp_v2|<base64>
+// 3. Encrypt 1 OCT into private balance (one call, ~1s)
+const tx = PrivateTransfer.encrypt(ctx, 1_000_000n, (phase, pct) => {
+  console.log(`${phase}: ${pct}%`);
+});
+// tx.encrypted_data is ready for SDK callContract
 
-// 4. Decrypt
-const value = ctx.decrypt(result.cipher);
-console.log(value); // 1000000n
-
-// 5. Cipher arithmetic
-const sum = ctx.ctAdd(cipherA, cipherB);
-const diff = ctx.ctSub(cipherA, cipherB);
-
-// 6. Build transaction payloads
-const encryptTxData = buildEncryptPayload(ctx, 1000000);
-const decryptTxData = await buildDecryptPayload(ctx, 500000, currentCipher, currentBalance);
+// 4. Decrypt back to public (one call, 30-60s with range proof)
+const dtx = PrivateTransfer.decrypt(ctx, 500_000n, currentCipher, currentBalance, (phase, pct) => {
+  progressBar.value = pct;
+});
 ```
 
-## API Reference
+---
 
-### `PvacContext`
+## Private Transfers
 
-| Method | Description | Speed |
-|---|---|---|
-| `encrypt(value)` | FHE encrypt a value | <1ms |
-| `encryptSeeded(value, seed)` | Deterministic encryption | <1ms |
-| `encryptZero()` | Encrypt zero | <1ms |
-| `decrypt(cipher)` | Decrypt to plaintext | 0.5-5s |
-| `ctAdd(a, b)` | Homomorphic addition | <1ms |
-| `ctSub(a, b)` | Homomorphic subtraction | <1ms |
-| `makeRangeProof(cipher, value)` | Prove value ≥ 0 | 30-60s |
-| `makeRangeProofParallel(cipher, value)` | Parallel range proof (rayon) | 15-30s |
-| `makeBoundProof(cipher, value, blinding)` | Prove cipher matches commitment | <1s |
-| `pedersenCommit(value, blinding)` | Pedersen commitment | <1ms |
-| `verifyRangeProof(cipher, proof)` | Verify range proof | <1s |
-| `verifyBoundProof(cipher, proof, commitment)` | Verify bound proof | <1ms |
-| `fullEncrypt(value)` | Encrypt + bound proof in one call | <1s |
-| `serializePubkey()` | Serialize public key (~3-4MB) | 5-15s |
-
-### Encoding
-
-| Function | Description |
-|---|---|
-| `encodeCipher(bytes)` | → `hfhe_v1\|<base64>` |
-| `decodeCipher(str)` | → raw bytes |
-| `encodeProof(bytes)` | → `zkzp_v2\|<base64>` |
-| `decodeProof(str)` | → raw bytes |
-
-### Transaction Payloads
-
-| Function | Description |
-|---|---|
-| `buildEncryptPayload(ctx, amount)` | Build encrypted_data for encrypt TX |
-| `buildDecryptPayload(ctx, amount, currentCipher, currentBalance)` | Build encrypted_data for decrypt TX (slow — range proof) |
-
-## Private DEX Integration
-
-For a DEX operating on encrypted balances:
+Encrypt/decrypt in one call with progress tracking.
 
 ```typescript
-// User wants to swap 100 OCT for token X
+import { PrivateTransfer } from '@0xio/pvac';
 
-// 1. Encrypt the swap amount
-const swapCipher = ctx.encrypt(100_000_000); // 100 OCT in microOCT
+// Public → Private (fast, ~1s)
+const encryptTx = PrivateTransfer.encrypt(ctx, 1_000_000n, (phase, pct) => {
+  // phase: 'generating-seed' | 'encrypting' | 'commitment' | 'bound-proof' | 'encoding' | 'done'
+  updateUI(phase, pct);
+});
 
-// 2. Prove the amount is valid (bound proof)
-const blinding = crypto.getRandomValues(new Uint8Array(32));
-const { proof, commitment } = ctx.makeBoundProof(swapCipher, 100_000_000, blinding);
+// Private → Public (slow, 30-60s — range proof)
+const decryptTx = PrivateTransfer.decrypt(
+  ctx,
+  500_000n,         // amount to decrypt
+  currentCipher,     // current encrypted balance (raw bytes)
+  currentBalance,    // current decrypted value
+  (phase, pct) => {
+    // phase: 'range-proof' at pct 30 = the slow part
+    progressBar.value = pct;
+  },
+);
 
-// 3. Update pool reserves (cipher arithmetic)
-const newPoolOCT = ctx.ctSub(poolOCTCipher, swapCipher);  // pool loses OCT
-const newPoolX = ctx.ctAdd(poolXCipher, outputCipher);      // pool gains token X
-
-// 4. Range proof: prove pool still has non-negative OCT
-const rangeProof = await ctx.makeRangeProofParallel(newPoolOCT, newPoolValue);
-
-// 5. Submit to DEX contract with all proofs
+// Submit via SDK
+await wallet.callContract({
+  contract: 'self',
+  method: encryptTx.op_type,
+  params: [],
+  encrypted_data: encryptTx.encrypted_data,
+});
 ```
 
-## FAQ
+---
 
-### Why no `ct_sub_const(cipher, amount)`?
+## Confidential Balance
 
-Some contracts expect `fhe_sub_const` — subtracting a public constant from an encrypted cipher. We don't expose a separate `ct_sub_const` because `ctSub` already handles this:
+Fetch, decrypt, cache, and display encrypted balances.
 
 ```typescript
-// Subtracting a public amount from an encrypted balance:
-const amountCipher = ctx.encrypt(BigInt(amount));     // encrypt the constant
-const newBalance = ctx.ctSub(currentCipher, amountCipher); // subtract ciphers
+import { ConfidentialBalance } from '@0xio/pvac';
 
-// Then prove non-negative:
-const proof = ctx.makeRangeProof(newBalance, expectedValue);
+const balance = new ConfidentialBalance(ctx, 'http://YOUR_OCTRA_RPC:8080');
+
+// Subscribe to updates
+balance.onUpdate((snapshot) => {
+  const formatted = ConfidentialBalance.format(snapshot, octPrice);
+  console.log(`Public: ${formatted.public} OCT`);
+  console.log(`Private: ${formatted.private} OCT`);
+  console.log(`Total: ${formatted.total} OCT ($${formatted.totalUsd})`);
+});
+
+// Fetch + decrypt (cached on second call)
+const snapshot = await balance.fetch(myAddress, async (address) => {
+  // Sign the RPC auth challenge
+  const sig = wallet.signMessage(address);
+  return { signature: sig, publicKey: myPubKey };
+});
+
+// After encrypt/decrypt tx, invalidate cache
+balance.invalidate(myAddress);
 ```
 
-This is mathematically identical to `ct_sub_const`. Both produce `enc(balance - amount)`. The range proof verifies the decrypted value is ≥ 0 regardless of how the cipher was constructed.
+---
 
-### Approval popup shows amount ≠ 0?
+## Stealth Addresses
 
-When calling `sdk.callContract()`, the popup shows two numbers:
-- **Amount** = native OCT sent to the contract (set `amount: 0` if none)
-- **Fee** = OU / gas fee (typically 0.001-0.01 OCT)
+Send private payments that only the recipient can detect.
 
-If you see a non-zero amount and expect 0, check your `callContract({ amount: 0 })` param.
+```typescript
+import { StealthAddress } from '@0xio/pvac';
+
+// === Sender ===
+
+// 1. Create a stealth output for the recipient
+const { output, ephSk } = await StealthAddress.createOutput(
+  recipientViewPub,  // recipient's view public key (32 bytes)
+  1_000_000n,        // 1 OCT
+  blinding,          // 32-byte blinding factor
+);
+// output = { ephPub, tag, encAmount } — include in the transaction
+
+// === Recipient ===
+
+// 2. Derive view keypair from wallet
+const { viewSk, viewPub } = await StealthAddress.deriveViewKeypair(privateKeyB64);
+
+// 3. Scan chain outputs to find payments addressed to you
+const mine = await StealthAddress.scan(chainOutputs, viewSk, myAddress);
+for (const m of mine) {
+  console.log(`Found ${m.amount} microOCT at index ${m.index}`);
+  // m.claimSecret — use to claim/spend the funds
+  // m.blinding — use for proof generation
+}
+
+// 4. Compute claim public key for spending
+const claimPub = await StealthAddress.computeClaimPub(m.claimSecret, myAddress);
+```
+
+---
+
+## Confidential Token
+
+ORC20 tokens with encrypted balances.
+
+```typescript
+import { ConfidentialToken } from '@0xio/pvac';
+
+const token = new ConfidentialToken(ctx, 'octTokenContractAddress...');
+
+// Get token info (cached)
+const info = await token.info();
+console.log(`${info.symbol} (${info.decimals} decimals)`);
+
+// Check balance
+const bal = await token.balanceOf(myAddress);
+console.log(`Balance: ${await token.formatAmount(bal)}`);
+
+// Build a private transfer
+const tx = token.buildTransfer(recipientAddress, 500_000n, (phase, pct) => {
+  console.log(`${phase}: ${pct}%`);
+});
+// tx = { contract, method, args, encrypted_data } — ready for SDK
+
+// Approve + transferFrom
+const approveTx = token.buildApprove(spenderAddress, 1_000_000n);
+const fromTx = token.buildTransferFrom(ownerAddress, toAddress, 500_000n);
+```
+
+---
+
+## Compliance Proofs
+
+Prove properties about encrypted balances without revealing them. For DeFi collateral checks, regulatory compliance, AML thresholds.
+
+```typescript
+import { ComplianceProof } from '@0xio/pvac';
+
+// Prove: "my encrypted balance ≥ 100 OCT" (without revealing actual balance)
+const proof = ComplianceProof.balanceAbove(
+  ctx,
+  encryptedCipher,    // your encrypted balance
+  actualBalance,       // known plaintext (for proof generation)
+  100_000_000n,        // 100 OCT threshold
+  (phase, pct) => progressBar.value = pct,
+);
+
+// Verify (on-chain or off-chain)
+const valid = ComplianceProof.verify(ctx, proof.shiftedCipher, proof.rangeProof);
+
+// Prove: "my balance ≤ 10,000 OCT" (for regulatory limits)
+const limitProof = ComplianceProof.balanceBelow(ctx, cipher, balance, 10_000_000_000n);
+
+// Prove: "my balance is between 100 and 10,000 OCT"
+const rangeProof = ComplianceProof.balanceInRange(ctx, cipher, balance, 100_000_000n, 10_000_000_000n);
+```
+
+---
+
+## Web Worker Offload
+
+Range proofs take 30-60s. Don't freeze the UI.
+
+```typescript
+import { ProofWorker } from '@0xio/pvac';
+
+// Create worker (loads WASM in background thread)
+const worker = new ProofWorker('/wasm/pvac_rs_bg.wasm');
+await worker.createContext(seed);
+
+// Encrypt — fast, but still off-thread
+const enc = await worker.encrypt(1_000_000n, {
+  onProgress: (phase, pct) => console.log(`${phase}: ${pct}%`),
+});
+
+// Decrypt — the slow one, now off main thread
+const dec = await worker.decrypt(500_000n, currentCipher, currentBalance, {
+  onProgress: (phase, pct) => {
+    progressBar.value = pct;
+    statusText.textContent = phase === 'range-proof' ? 'Generating proof...' : phase;
+  },
+});
+
+// enc.encrypted_data / dec.encrypted_data — ready for chain
+
+// Cleanup
+worker.terminate();
+```
+
+---
+
+## Groth16 ZK Proofs (BN254)
+
+Generate and verify Groth16 zero-knowledge proofs on Octra. Uses the on-chain verifier at `oct3rzJZucw9BsS7LRWBNoKRoaBsXAhhSK4LmfRvg45ppSs`.
+
+```typescript
+import { Groth16, loadCircuit } from '@0xio/pvac';
+
+// Load circuit (requires snarkjs as peer dep)
+const circuit = await loadCircuit('/circuits/MyCircuit');
+
+// Generate proof
+const { proofB64, inputsB64 } = await Groth16.prove(circuit, {
+  publicInput1: 42n,
+  publicInput2: recipientField,
+  privateWitness: secretValue,
+});
+
+// Verify on Octra (calls on-chain BN254 verifier)
+const valid = await Groth16.verifyOnChain(proofB64, inputsB64, callerAddress);
+
+// Or verify locally (off-chain)
+const localValid = await Groth16.verifyLocal(circuit, proof, publicSignals);
+```
+
+Peer dependency for proof generation:
+```bash
+npm install snarkjs
+```
+
+---
+
+## Core FHE API
+
+Low-level FHE operations for advanced use cases.
+
+```typescript
+import { PvacContext, initPvac } from '@0xio/pvac';
+
+const wasm = await initPvac();
+const ctx = await PvacContext.create(seed, wasm, { preWarm: true, threads: 8 });
+
+// Encrypt / Decrypt
+const cipher = ctx.encrypt(1_000_000n);
+const value = ctx.decrypt(cipher);                      // → 1000000n
+
+// Cipher arithmetic (homomorphic)
+const sum = ctx.ctAdd(cipherA, cipherB);                // enc(a + b)
+const diff = ctx.ctSub(cipherA, cipherB);               // enc(a - b)
+
+// Proofs
+const rangeProof = ctx.makeRangeProofParallel(cipher, value);   // 15-30s
+const boundProof = ctx.makeBoundProof(cipher, value, blinding); // <1s
+const commitment = ctx.pedersenCommit(value, blinding);         // <1ms
+
+// Verification
+ctx.verifyRangeProof(cipher, rangeProof);               // → boolean
+ctx.verifyBoundProof(cipher, proof, commitment);         // → boolean
+
+// Full encrypt (encrypt + bound proof + encode in one call)
+const result = ctx.fullEncrypt(1_000_000n);
+// result = { cipher, cipherB64, boundProof, boundProofEncoded }
+
+// Serialization (for PVAC registration)
+const pubkey = ctx.serializePubkey();                    // ~3MB, 5-15s
+
+// Encoding
+ctx.encodeCipher(cipher);       // → 'hfhe_v1|<base64>'
+ctx.encodeRangeProof(proof);    // → 'rp_v1|<base64>'
+ctx.encodeZeroProof(proof);     // → 'zkzp_v2|<base64>'
+```
+
+---
 
 ## Requirements
 
-- **Browser only** — Chrome, Firefox, Edge, Brave (no Node.js, no React Native)
-- WebAssembly support (all modern browsers)
-- SharedArrayBuffer + COOP/COEP headers (for rayon thread pool parallelism)
-- ~100MB RAM for PVAC context initialization
-- WASM module is bundled (3.2MB) — no external setup needed
+- **Browser only** — Chrome, Firefox, Edge, Brave
+- WebAssembly support
+- SharedArrayBuffer + COOP/COEP headers (for rayon thread parallelism)
+- ~100MB RAM for PVAC context
+- WASM module is bundled (3.2MB)
 
 ## License
 
