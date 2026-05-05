@@ -1,14 +1,15 @@
 {
   "name": "@0xio/pvac",
-  "version": "1.0.0",
-  "description": "PVAC-HFHE privacy primitives for Octra Network — FHE encryption, range proofs, and cipher arithmetic",
+  "version": "1.0.1",
+  "description": "PVAC-HFHE privacy primitives for Octra Network — FHE encryption, stealth addresses, confidential tokens, compliance proofs, Groth16 ZK verification",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
     "wasm/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "rollup -c",
