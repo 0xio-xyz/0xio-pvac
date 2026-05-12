@@ -1,6 +1,6 @@
 {
   "name": "@0xio/pvac",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "PVAC-HFHE privacy primitives for Octra Network — FHE encryption, stealth addresses, confidential tokens, compliance proofs, Groth16 ZK verification",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",

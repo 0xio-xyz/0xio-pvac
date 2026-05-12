@@ -1,5 +1,5 @@
 /**
- * ConfidentialToken — ORC20 token with encrypted balances.
+ * ConfidentialToken — OAT token with encrypted balances.
  *
  * High-level interface for interacting with privacy-preserving tokens on Octra:
  * - Query encrypted balance and decrypt
@@ -73,8 +73,25 @@ export class ConfidentialToken {
     return this.infoCache;
   }
 
-  /** Get public balance of an address */
+  /** Get public balance of an address (uses fast tokensByAddress RPC with balance_of fallback) */
   async balanceOf(address: string): Promise<bigint> {
+    try {
+      const res = await fetch(this.rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1,
+          method: 'octra_tokensByAddress',
+          params: [address],
+        }),
+      });
+      const data = await res.json();
+      const tokens: any[] = data?.result?.tokens || [];
+      const match = tokens.find((t: any) =>
+        (t.contract_address || t.contractAddress || t.address) === this.address
+      );
+      if (match) return BigInt(match.balance ?? 0);
+    } catch { /* fallback below */ }
     const result = await this.view('balance_of', [address]);
     return BigInt(result ?? 0);
   }
