@@ -65,14 +65,14 @@ function toHex(bytes: Uint8Array): string {
 }
 
 async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  const hash = await crypto.subtle.digest('SHA-256', data);
+  const hash = await crypto.subtle.digest('SHA-256', data as BufferSource);
   return new Uint8Array(hash);
 }
 
 async function aesGcmEncrypt(key: Uint8Array, plaintext: Uint8Array): Promise<Uint8Array> {
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const aesKey = await crypto.subtle.importKey('raw', key.slice(0, 32), 'AES-GCM', false, ['encrypt']);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aesKey, plaintext);
+  const aesKey = await crypto.subtle.importKey('raw', key.slice(0, 32) as BufferSource, 'AES-GCM', false, ['encrypt']);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, aesKey, plaintext as BufferSource);
   return concat(nonce, new Uint8Array(ct));
 }
 
@@ -88,8 +88,8 @@ async function aesGcmDecrypt(key: Uint8Array, data: Uint8Array): Promise<Uint8Ar
 async function x25519(sk: Uint8Array, pk: Uint8Array): Promise<Uint8Array> {
   try {
     // Try SubtleCrypto X25519 (Chrome 113+, Safari 17+)
-    const privKey = await crypto.subtle.importKey('raw', sk, { name: 'X25519' } as any, false, ['deriveBits']);
-    const pubKey = await crypto.subtle.importKey('raw', pk, { name: 'X25519' } as any, true, []);
+    const privKey = await crypto.subtle.importKey('raw', sk as BufferSource, { name: 'X25519' } as any, false, ['deriveBits']);
+    const pubKey = await crypto.subtle.importKey('raw', pk as BufferSource, { name: 'X25519' } as any, true, []);
     const bits = await crypto.subtle.deriveBits({ name: 'X25519', public: pubKey } as any, privKey, 256);
     return new Uint8Array(bits);
   } catch {

@@ -4,6 +4,8 @@
  *
  * CANONICAL FORMAT (all platforms must match):
  *   { cipher, amount_commitment, zero_proof, blinding [, range_proof_balance] }
+ *
+ * Every proof takes the network proof policy from readProofPolicy.
  */
 
 import type { PvacContext } from './context';
@@ -15,15 +17,16 @@ import { uint8ToBase64 } from './encoding';
  *
  * @param ctx - Initialized PvacContext
  * @param amount - Amount in microOCT as bigint (e.g., 1000000n = 1 OCT)
+ * @param policy - Network proof policy (readProofPolicy)
  * @returns JSON string ready for encrypted_data field
  */
-export function buildEncryptPayload(ctx: PvacContext, amount: bigint): string {
+export function buildEncryptPayload(ctx: PvacContext, amount: bigint, policy: number): string {
   const seed = crypto.getRandomValues(new Uint8Array(32));
   const blinding = crypto.getRandomValues(new Uint8Array(32));
 
   const cipher = ctx.encryptSeeded(amount, seed);
   const { commitment } = ctx.pedersenCommit(amount, blinding);
-  const { proof } = ctx.makeBoundProof(cipher, amount, blinding);
+  const { proof } = ctx.makeBoundProof(cipher, amount, blinding, policy);
 
   return JSON.stringify({
     cipher: ctx.encodeCipher(cipher),
@@ -35,12 +38,13 @@ export function buildEncryptPayload(ctx: PvacContext, amount: bigint): string {
 
 /**
  * Build the encrypted_data JSON for a decrypt transaction.
- * WARNING: makeRangeProof is slow (30-60s+).
+ * The bound range proof takes about 10 s threaded on an M3.
  *
  * @param ctx - Initialized PvacContext
  * @param amount - Amount to decrypt in microOCT as bigint
- * @param currentCipher - Current encrypted balance (raw bytes, no prefix)
- * @param currentBalance - Current decrypted balance in microOCT as bigint
+ * @param currentCipher - Current encrypted balance (raw bytes, no prefix), freshly read from chain
+ * @param currentBalance - That cipher decrypted, in microOCT as bigint
+ * @param policy - Network proof policy (readProofPolicy)
  * @returns JSON string ready for encrypted_data field
  */
 export function buildDecryptPayload(
@@ -48,22 +52,22 @@ export function buildDecryptPayload(
   amount: bigint,
   currentCipher: Cipher,
   currentBalance: bigint,
+  policy: number,
 ): string {
+  if (amount <= 0n) throw new Error('Amount must be positive');
+  if (amount > currentBalance) {
+    throw new Error(`Insufficient encrypted balance: have ${currentBalance}, need ${amount}`);
+  }
   const seed = crypto.getRandomValues(new Uint8Array(32));
   const blinding = crypto.getRandomValues(new Uint8Array(32));
 
   const cipher = ctx.encryptSeeded(amount, seed);
   const { commitment } = ctx.pedersenCommit(amount, blinding);
-  const { proof } = ctx.makeBoundProof(cipher, amount, blinding);
+  const { proof } = ctx.makeBoundProof(cipher, amount, blinding, policy);
 
   const newBalanceCipher = ctx.ctSub(currentCipher, cipher);
   const newBalanceValue = currentBalance - amount;
-
-  if (newBalanceValue < 0n) {
-    throw new Error(`Insufficient encrypted balance: have ${currentBalance}, need ${amount}`);
-  }
-
-  const rangeProof = ctx.makeRangeProofParallel(newBalanceCipher, newBalanceValue);
+  const { proof: rangeProof } = ctx.makeBoundRangeProof(newBalanceCipher, newBalanceValue, policy);
 
   return JSON.stringify({
     cipher: ctx.encodeCipher(cipher),

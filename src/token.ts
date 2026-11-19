@@ -1,5 +1,5 @@
 /**
- * ConfidentialToken — OAT token with encrypted balances.
+ * ConfidentialToken: OAT token with encrypted balances.
  *
  * High-level interface for interacting with privacy-preserving tokens on Octra:
  * - Query encrypted balance and decrypt
@@ -9,7 +9,7 @@
  * Usage:
  *   const token = new ConfidentialToken(ctx, tokenAddress, rpcUrl);
  *   const balance = await token.balance(myAddress, signer);
- *   const tx = await token.transfer(to, 1_000_000n, currentCipher, currentBalance);
+ *   const tx = token.buildTransfer(to, 1_000_000n, policy);
  */
 
 import type { PvacContext } from './context';
@@ -105,10 +105,13 @@ export class ConfidentialToken {
   /**
    * Build a private transfer payload.
    * Encrypts the amount, generates bound proof, and returns ready-to-submit data.
+   *
+   * @param policy - Network proof policy (readProofPolicy)
    */
   buildTransfer(
     to: string,
     amount: bigint,
+    policy: number,
     onProgress?: ProgressCallback,
   ): TokenTxPayload {
     if (amount <= 0n) throw new Error('Amount must be positive');
@@ -122,7 +125,7 @@ export class ConfidentialToken {
     const { commitment } = this.ctx.pedersenCommit(amount, blinding);
 
     onProgress?.('bound-proof', 60);
-    const { proof } = this.ctx.makeBoundProof(cipher, amount, blinding);
+    const { proof } = this.ctx.makeBoundProof(cipher, amount, blinding, policy);
 
     onProgress?.('encoding', 90);
     const encrypted_data = JSON.stringify({

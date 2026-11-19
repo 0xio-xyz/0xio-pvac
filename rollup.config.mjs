@@ -15,5 +15,5 @@ export default {
       declarationDir: 'dist',
     }),
   ],
-  external: [],
+  external: ['tweetnacl'],
 };

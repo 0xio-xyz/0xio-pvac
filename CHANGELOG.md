@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.0 (2026-11-19)
+
+Breaking: every proof takes the network proof policy, and secret key export is gone.
+
+### Security
+
+- Removed `PvacContext.serializeSeckey` (pvac-rs no longer exports the secret key)
+- Proofs follow the network proof policy (wide reduction, key binding) from `octra_pvacMigrationStatus`
+- Policy outside 0..3 is refused before any proof runs
+
+### Fixed
+
+- Decrypt `range_proof_balance` is the bound range proof the chain accepts (was the per-bit range proof)
+- Compliance proofs use bound range proofs and verify against their commitment
+- `preWarm` builds the full proof generator table (`pvac_prewarm_generators`)
+- `ProofWorker` decrypt refuses a zero amount or one above the balance before proving
+- Typecheck passes again (`BufferSource` casts in stealth, `tweetnacl` declared)
+
+### Added
+
+- `readProofPolicy(rpcUrl, address)`, `requireProofPolicy`, `PROOF_WIDE`, `PROOF_BIND_KEY`, `ProofKind`, `ProofPolicyError`
+- `PvacContext.proveAmount`, `verifyAmount`, `makeBoundRangeProof`
+- `PvacContext.makeKeyOwnerProof`, `buildCipherProofMigration`, `checkBoundProvable`, `matchesSecretProfile`
+- `PvacContext.decryptSafe`, `decryptLegacy`
+- `PvacContext.limits()`: pvac-rs fee and balance bounds
+- `tweetnacl` as optional peer dependency (stealth view keys)
+
+### Changed
+
+- Bundled WASM is pvac-rs 0.3.0 (canonical parity, proof policy, faster proofs)
+- `policy` argument added (before `onProgress` or options) to `buildEncryptPayload`, `buildDecryptPayload`, `PrivateTransfer.encrypt`, `PrivateTransfer.decrypt`, `ConfidentialToken.buildTransfer`, `ComplianceProof.*`, `ProofWorker.encrypt`, `ProofWorker.decrypt`, `PvacContext.makeBoundProof`, `verifyBoundProof`, `fullEncrypt`
+- `ComplianceResult` carries `commitment` and `commitmentB64`; `ComplianceProof.verify` takes the commitment and policy
+- `makeRangeProof`, `makeRangeProofParallel` and `makeAggregatedRangeProof` stay for off-chain use only
+
 ## 1.0.1 (2026-05-05)
 
 ### New Modules

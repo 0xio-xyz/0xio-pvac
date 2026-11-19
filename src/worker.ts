@@ -1,20 +1,24 @@
 /**
- * ProofWorker — offload slow proof generation to a Web Worker.
+ * ProofWorker: offload slow proof generation to a Web Worker.
  *
- * Range proofs take 30-60s and freeze the UI thread. This module
+ * Proofs take seconds and freeze the UI thread. This module
  * runs them in a dedicated worker with progress reporting.
  *
  * Usage:
- *   const worker = new ProofWorker(wasmUrl);
- *   const result = await worker.decrypt(seed, amount, currentCipher, currentBalance, {
+ *   const worker = new ProofWorker(glueUrl);
+ *   await worker.createContext(seed);
+ *   const policy = await readProofPolicy(rpcUrl, address);
+ *   const result = await worker.decrypt(amount, currentCipher, currentBalance, policy, {
  *     onProgress: (pct) => console.log(`${pct}%`),
  *   });
  *   worker.terminate();
  *
  * Requirements:
  * - SharedArrayBuffer (COOP/COEP headers)
- * - WASM module URL accessible from worker
+ * - pvac_rs.js URL accessible from worker
  */
+
+import { assertProofPolicy } from './policy';
 
 export interface WorkerOptions {
   onProgress?: (phase: string, pct: number) => void;
@@ -40,7 +44,7 @@ export class ProofWorker {
   private wasmUrl: string;
 
   /**
-   * @param wasmUrl - URL to the pvac_rs_bg.wasm file
+   * @param wasmUrl - URL to the pvac_rs.js glue (pvac_rs_bg.wasm beside it)
    * @param threads - Number of rayon threads (default: navigator.hardwareConcurrency)
    */
   constructor(wasmUrl: string, threads?: number) {
@@ -49,10 +53,17 @@ export class ProofWorker {
   }
 
   private async init(threads: number): Promise<void> {
-    // Create worker from inline blob — avoids needing a separate worker file
+    // Create worker from inline blob so no separate worker file is needed
     const workerCode = `
       let wasm = null;
       let ctx = null;
+      const OWN_KEY = new Uint8Array(0);
+      const KIND_AMOUNT = 0;
+      const KIND_RANGE = 2;
+      const policyArg = (p) => {
+        if (!Number.isInteger(p) || p < 0 || p > 3) throw new Error('proof policy must be 0..3');
+        return p;
+      };
 
       self.onmessage = async (e) => {
         const { id, type, payload } = e.data;
@@ -61,7 +72,7 @@ export class ProofWorker {
             const mod = await import(payload.wasmUrl);
             await mod.default();
             await mod.initThreadPool(payload.threads);
-            mod.pvac_pre_warm_generators(64);
+            mod.pvac_prewarm_generators();
             wasm = mod;
             self.postMessage({ id, type: 'ready' });
             return;
@@ -80,7 +91,7 @@ export class ProofWorker {
             const cipher = ctx.encrypt_seeded(BigInt(payload.amount), seed);
             self.postMessage({ id, type: 'progress', phase: 'commitment', pct: 40 });
             const commitment = ctx.pedersen_commit(BigInt(payload.amount), blinding);
-            const proof = ctx.make_bound_proof(cipher, BigInt(payload.amount), blinding);
+            const proof = ctx.proveAmount(OWN_KEY, cipher, BigInt(payload.amount), blinding, KIND_AMOUNT, policyArg(payload.policy));
             self.postMessage({ id, type: 'progress', phase: 'encoding', pct: 80 });
             const result = JSON.stringify({
               cipher: wasm.pvac_encode_cipher(cipher),
@@ -101,13 +112,14 @@ export class ProofWorker {
             const cipher = ctx.encrypt_seeded(BigInt(payload.amount), seed);
             self.postMessage({ id, type: 'progress', phase: 'commitment', pct: 10 });
             const commitment = ctx.pedersen_commit(BigInt(payload.amount), blinding);
-            const proof = ctx.make_bound_proof(cipher, BigInt(payload.amount), blinding);
+            const proof = ctx.proveAmount(OWN_KEY, cipher, BigInt(payload.amount), blinding, KIND_AMOUNT, policyArg(payload.policy));
             self.postMessage({ id, type: 'progress', phase: 'balance-cipher', pct: 15 });
             const currentCipher = new Uint8Array(payload.currentCipher);
             const newCipher = ctx.ct_sub(currentCipher, cipher);
             const newValue = BigInt(payload.currentBalance) - BigInt(payload.amount);
             self.postMessage({ id, type: 'progress', phase: 'range-proof', pct: 20 });
-            const rangeProof = ctx.make_range_proof_parallel(newCipher, newValue);
+            const rangeBlinding = crypto.getRandomValues(new Uint8Array(32));
+            const rangeProof = ctx.proveAmount(OWN_KEY, newCipher, newValue, rangeBlinding, KIND_RANGE, policyArg(payload.policy));
             self.postMessage({ id, type: 'progress', phase: 'encoding', pct: 95 });
             const result = JSON.stringify({
               cipher: wasm.pvac_encode_cipher(cipher),
@@ -167,28 +179,39 @@ export class ProofWorker {
   }
 
   /**
-   * Encrypt (public → private) in the worker thread.
-   * Fast — no range proof.
+   * Encrypt (public -> private) in the worker thread.
+   * Fast: no range proof.
+   *
+   * @param policy - Network proof policy (readProofPolicy)
    */
-  async encrypt(amount: bigint, options?: WorkerOptions): Promise<WorkerResult> {
+  async encrypt(amount: bigint, policy: number, options?: WorkerOptions): Promise<WorkerResult> {
+    assertProofPolicy(policy);
     await this.ready;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onProgress: options?.onProgress });
-      this.worker!.postMessage({ id, type: 'encrypt', payload: { amount: amount.toString() } });
+      this.worker!.postMessage({ id, type: 'encrypt', payload: { amount: amount.toString(), policy } });
     });
   }
 
   /**
-   * Decrypt (private → public) in the worker thread.
-   * SLOW — runs range proof off the main thread.
+   * Decrypt (private -> public) in the worker thread.
+   * Runs the bound range proof off the main thread.
+   *
+   * @param policy - Network proof policy (readProofPolicy)
    */
   async decrypt(
     amount: bigint,
     currentCipher: Uint8Array,
     currentBalance: bigint,
+    policy: number,
     options?: WorkerOptions,
   ): Promise<WorkerResult> {
+    assertProofPolicy(policy);
+    if (amount <= 0n) throw new Error('Amount must be positive');
+    if (amount > currentBalance) {
+      throw new Error(`Insufficient encrypted balance: have ${currentBalance}, need ${amount}`);
+    }
     await this.ready;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -200,6 +223,7 @@ export class ProofWorker {
           amount: amount.toString(),
           currentCipher: Array.from(currentCipher),
           currentBalance: currentBalance.toString(),
+          policy,
         },
       });
     });

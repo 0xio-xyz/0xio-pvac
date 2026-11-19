@@ -1,5 +1,5 @@
 /**
- * @0xio/pvac — Privacy Primitives for Octra Network
+ * @0xio/pvac: Privacy Primitives for Octra Network
  *
  * FHE encryption, range proofs, stealth addresses, confidential tokens,
  * compliance proofs, Groth16 ZK verification, and Web Worker offloading.
@@ -10,6 +10,25 @@
 
 // Core FHE context
 export { PvacContext } from './context';
+export type { KeyOwnerProof, CipherProofMigration, BoundProvable, PvacLimits } from './context';
+
+// Network proof policy
+export {
+  PROOF_WIDE,
+  PROOF_BIND_KEY,
+  ProofKind,
+  ProofPolicyError,
+  PROOF_POLICY_UNAVAILABLE,
+  PROOF_KEY_POLICY_UNAVAILABLE,
+  PROOF_POLICY_UNREACHABLE,
+  PROOF_POLICY_CHANGED,
+  readProofPolicy,
+  requireProofPolicy,
+  policyFromStatus,
+  policyFromRuntime,
+  assertProofPolicy,
+  bindsKey,
+} from './policy';
 export type {
   Cipher,
   RangeProof,

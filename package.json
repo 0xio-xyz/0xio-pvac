@@ -1,7 +1,7 @@
 {
   "name": "@0xio/pvac",
-  "version": "1.0.2",
-  "description": "PVAC-HFHE privacy primitives for Octra Network — FHE encryption, stealth addresses, confidential tokens, compliance proofs, Groth16 ZK verification",
+  "version": "2.0.0",
+  "description": "PVAC-HFHE privacy primitives for Octra Network: FHE encryption, stealth addresses, confidential tokens, compliance proofs, Groth16 ZK verification",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
@@ -33,6 +33,14 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/0xio-xyz/0xio-pvac.git"
+  },
+  "peerDependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "peerDependenciesMeta": {
+    "tweetnacl": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^15.0.0",

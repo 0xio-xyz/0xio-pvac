@@ -1,5 +1,5 @@
 /**
- * PrivateTransfer — high-level API for privacy-preserving transfers on Octra.
+ * PrivateTransfer: high-level API for privacy-preserving transfers on Octra.
  *
  * Wraps the low-level FHE operations into simple, one-call functions:
  * - privateEncrypt: move public OCT into encrypted balance
@@ -7,7 +7,8 @@
  * - privateSend: stealth transfer to another address (FHE + stealth tag + AES)
  *
  * Usage:
- *   const tx = await PrivateTransfer.encrypt(ctx, 1_000_000n); // 1 OCT
+ *   const policy = await readProofPolicy(rpcUrl, address);
+ *   const tx = PrivateTransfer.encrypt(ctx, 1_000_000n, policy); // 1 OCT
  *   // tx.encrypted_data is ready for SDK callContract
  */
 
@@ -15,7 +16,7 @@ import type { PvacContext } from './context';
 import type { Cipher } from './types';
 import { uint8ToBase64 } from './encoding';
 
-/** Result of a private transfer operation — ready to submit to chain */
+/** Result of a private transfer operation, ready to submit to chain */
 export interface TransferResult {
   /** JSON string for the encrypted_data field */
   encrypted_data: string;
@@ -33,13 +34,14 @@ export type ProgressCallback = (phase: string, pct: number) => void;
 export const PrivateTransfer = {
   /**
    * Encrypt public OCT into encrypted balance.
-   * Fast (~1s) — no range proof needed.
+   * About 3 s threaded on an M3; no range proof needed.
    *
    * @param ctx - Initialized PvacContext
    * @param amount - Amount in microOCT (e.g., 1_000_000n = 1 OCT)
+   * @param policy - Network proof policy (readProofPolicy)
    * @param onProgress - Optional progress callback
    */
-  encrypt(ctx: PvacContext, amount: bigint, onProgress?: ProgressCallback): TransferResult {
+  encrypt(ctx: PvacContext, amount: bigint, policy: number, onProgress?: ProgressCallback): TransferResult {
     if (amount <= 0n) throw new Error('Amount must be positive');
     const t0 = performance.now();
 
@@ -54,7 +56,7 @@ export const PrivateTransfer = {
     const { commitment } = ctx.pedersenCommit(amount, blinding);
 
     onProgress?.('bound-proof', 70);
-    const { proof } = ctx.makeBoundProof(cipher, amount, blinding);
+    const { proof } = ctx.makeBoundProof(cipher, amount, blinding, policy);
 
     onProgress?.('encoding', 90);
     const encrypted_data = JSON.stringify({
@@ -70,12 +72,13 @@ export const PrivateTransfer = {
 
   /**
    * Decrypt encrypted OCT back to public balance.
-   * SLOW (30-60s) — requires range proof to prove remaining balance ≥ 0.
+   * About 10 s threaded on an M3: a bound range proof shows the remaining balance is >= 0.
    *
    * @param ctx - Initialized PvacContext
    * @param amount - Amount to decrypt in microOCT
-   * @param currentCipher - Current encrypted balance (raw bytes, no prefix)
-   * @param currentBalance - Current decrypted balance in microOCT
+   * @param currentCipher - Current encrypted balance (raw bytes, no prefix), freshly read from chain
+   * @param currentBalance - That cipher decrypted, in microOCT
+   * @param policy - Network proof policy (readProofPolicy)
    * @param onProgress - Optional progress callback
    */
   decrypt(
@@ -83,6 +86,7 @@ export const PrivateTransfer = {
     amount: bigint,
     currentCipher: Cipher,
     currentBalance: bigint,
+    policy: number,
     onProgress?: ProgressCallback,
   ): TransferResult {
     if (amount <= 0n) throw new Error('Amount must be positive');
@@ -102,15 +106,14 @@ export const PrivateTransfer = {
     const { commitment } = ctx.pedersenCommit(amount, blinding);
 
     onProgress?.('bound-proof', 20);
-    const { proof } = ctx.makeBoundProof(cipher, amount, blinding);
+    const { proof } = ctx.makeBoundProof(cipher, amount, blinding, policy);
 
     onProgress?.('computing-new-balance', 25);
     const newBalanceCipher = ctx.ctSub(currentCipher, cipher);
     const newBalanceValue = currentBalance - amount;
 
     onProgress?.('range-proof', 30);
-    // This is the slow part — 30-60s
-    const rangeProof = ctx.makeRangeProofParallel(newBalanceCipher, newBalanceValue);
+    const { proof: rangeProof } = ctx.makeBoundRangeProof(newBalanceCipher, newBalanceValue, policy);
 
     onProgress?.('encoding', 95);
     const encrypted_data = JSON.stringify({
