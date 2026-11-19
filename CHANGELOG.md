@@ -17,6 +17,10 @@ Breaking: every proof takes the network proof policy, and secret key export is g
 - `preWarm` builds the full proof generator table (`pvac_prewarm_generators`)
 - `ProofWorker` decrypt refuses a zero amount or one above the balance before proving
 - Typecheck passes again (`BufferSource` casts in stealth, `tweetnacl` declared)
+- Package loads on pages that are not cross-origin isolated (single build fallback)
+- `initPvac` resolves `wasm/` from the module URL, not the page URL, and no longer needs `eval`
+- Rayon workers start when the package is served from another origin (CDN)
+- `PvacContext.create` and `ProofWorker` skip `threads` on the single build instead of crashing
 
 ### Added
 
@@ -25,11 +29,15 @@ Breaking: every proof takes the network proof policy, and secret key export is g
 - `PvacContext.makeKeyOwnerProof`, `buildCipherProofMigration`, `checkBoundProvable`, `matchesSecretProfile`
 - `PvacContext.decryptSafe`, `decryptLegacy`
 - `PvacContext.limits()`: pvac-rs fee and balance bounds
+- Single-threaded build in `wasm/single/`, picked when the page cannot run threads
+- `initPvac({ mode, wasmBase })`, `pvacMode()`, `pvacGlueUrl()`, `canUseThreads()`
+- `ProofWorker` glue URL is optional (defaults to the bundled build)
 - `tweetnacl` as optional peer dependency (stealth view keys)
 
 ### Changed
 
 - Bundled WASM is pvac-rs 0.3.0 (canonical parity, proof policy, faster proofs)
+- Threaded build moved to `wasm/threaded/`
 - `policy` argument added (before `onProgress` or options) to `buildEncryptPayload`, `buildDecryptPayload`, `PrivateTransfer.encrypt`, `PrivateTransfer.decrypt`, `ConfidentialToken.buildTransfer`, `ComplianceProof.*`, `ProofWorker.encrypt`, `ProofWorker.decrypt`, `PvacContext.makeBoundProof`, `verifyBoundProof`, `fullEncrypt`
 - `ComplianceResult` carries `commitment` and `commitmentB64`; `ComplianceProof.verify` takes the commitment and policy
 - `makeRangeProof`, `makeRangeProofParallel` and `makeAggregatedRangeProof` stay for off-chain use only

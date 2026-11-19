@@ -69,7 +69,7 @@ export class PvacContext {
    * @param seed - 32 bytes (e.g., HMAC-SHA512("Octra seed", mnemonic)[0:32])
    * @param wasmModule - WASM module from initPvac()
    * @param options.preWarm - Build the proof generator table now (faster first proof)
-   * @param options.threads - Init rayon thread pool for parallel proofs
+   * @param options.threads - Init rayon thread pool for parallel proofs (ignored by the single build)
    */
   static async create(
     seed: Uint8Array,
@@ -78,7 +78,7 @@ export class PvacContext {
   ): Promise<PvacContext> {
     if (seed.length !== 32) throw new Error('Seed must be 32 bytes');
 
-    if (options?.threads) {
+    if (options?.threads && wasmModule.initThreadPool) {
       await wasmModule.initThreadPool(options.threads);
     }
 
@@ -208,10 +208,12 @@ export class PvacContext {
 
   /**
    * Parallel range proof using rayon threads.
-   * Requires initThreadPool() in create options.
+   * Requires initThreadPool() in create options; the single build proves serially.
    */
   makeRangeProofParallel(cipher: Cipher, value: bigint): RangeProof {
-    return this._wasm.make_range_proof_parallel(cipher, value);
+    return this._wasm.make_range_proof_parallel
+      ? this._wasm.make_range_proof_parallel(cipher, value)
+      : this._wasm.make_range_proof(cipher, value);
   }
 
   /**

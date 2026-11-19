@@ -48,7 +48,7 @@ export interface DecryptPayload {
  */
 export interface PvacWasmModule {
   PvacContext: new (seed: Uint8Array) => PvacWasmContext;
-  initThreadPool(num_threads: number): Promise<any>;
+  initThreadPool?(num_threads: number): Promise<any>;
   pvac_pre_warm_generators(n: number): void;
   pvac_prewarm_generators(): void;
   pvac_prewarm_heap(bytes: number): boolean;
@@ -84,7 +84,7 @@ export interface PvacWasmContext {
   matchesSecretProfile(candidate_bytes: Uint8Array): boolean;
   check_bound_provable(cipher_bytes: Uint8Array): string;
   make_range_proof(cipher_bytes: Uint8Array, value: bigint): Uint8Array;
-  make_range_proof_parallel(cipher_bytes: Uint8Array, value: bigint): Uint8Array;
+  make_range_proof_parallel?(cipher_bytes: Uint8Array, value: bigint): Uint8Array;
   make_aggregated_range_proof(cipher_bytes: Uint8Array, value: bigint): Uint8Array;
   make_bound_proof(cipher_bytes: Uint8Array, amount: bigint, blinding: Uint8Array): Uint8Array;
   makeBoundRangeProof(cipher_bytes: Uint8Array, value: bigint): Uint8Array;

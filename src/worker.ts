@@ -5,7 +5,7 @@
  * runs them in a dedicated worker with progress reporting.
  *
  * Usage:
- *   const worker = new ProofWorker(glueUrl);
+ *   const worker = new ProofWorker();
  *   await worker.createContext(seed);
  *   const policy = await readProofPolicy(rpcUrl, address);
  *   const result = await worker.decrypt(amount, currentCipher, currentBalance, policy, {
@@ -13,12 +13,12 @@
  *   });
  *   worker.terminate();
  *
- * Requirements:
- * - SharedArrayBuffer (COOP/COEP headers)
- * - pvac_rs.js URL accessible from worker
+ * Threads need a cross-origin isolated page (COOP/COEP headers); elsewhere the
+ * single build proves serially.
  */
 
 import { assertProofPolicy } from './policy';
+import { canUseThreads, pvacGlueUrl } from './wasm';
 
 export interface WorkerOptions {
   onProgress?: (phase: string, pct: number) => void;
@@ -44,11 +44,11 @@ export class ProofWorker {
   private wasmUrl: string;
 
   /**
-   * @param wasmUrl - URL to the pvac_rs.js glue (pvac_rs_bg.wasm beside it)
+   * @param wasmUrl - URL to the pvac_rs.js glue (pvac_rs_bg.wasm beside it); default picks the bundled build
    * @param threads - Number of rayon threads (default: navigator.hardwareConcurrency)
    */
-  constructor(wasmUrl: string, threads?: number) {
-    this.wasmUrl = wasmUrl;
+  constructor(wasmUrl?: string, threads?: number) {
+    this.wasmUrl = wasmUrl ?? pvacGlueUrl(canUseThreads() ? 'threaded' : 'single');
     this.ready = this.init(threads ?? navigator.hardwareConcurrency);
   }
 
@@ -71,7 +71,7 @@ export class ProofWorker {
           if (type === 'init') {
             const mod = await import(payload.wasmUrl);
             await mod.default();
-            await mod.initThreadPool(payload.threads);
+            if (mod.initThreadPool) await mod.initThreadPool(payload.threads);
             mod.pvac_prewarm_generators();
             wasm = mod;
             self.postMessage({ id, type: 'ready' });

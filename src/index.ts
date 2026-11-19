@@ -46,7 +46,8 @@ export { encodeCipher, decodeCipher, encodeProof, decodeProof, uint8ToBase64, ba
 export { buildEncryptPayload, buildDecryptPayload } from './payloads';
 
 // WASM loader
-export { initPvac } from './wasm';
+export { initPvac, pvacMode, pvacGlueUrl, canUseThreads } from './wasm';
+export type { PvacMode, InitPvacOptions } from './wasm';
 
 // High-level: Private transfers (encrypt/decrypt in one call)
 export { PrivateTransfer } from './transfer';

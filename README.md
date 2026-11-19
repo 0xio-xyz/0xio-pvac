@@ -23,6 +23,36 @@ The WASM module is bundled. `StealthAddress` needs `tweetnacl` (optional peer de
 npm install tweetnacl
 ```
 
+## Threaded and single builds
+
+Two pvac-rs builds ship in `wasm/`. `initPvac()` picks one at runtime:
+
+| Build | Loads when | Encrypt | Decrypt |
+|---|---|---|---|
+| `wasm/threaded/` | the page is cross-origin isolated | about 3 s | about 10 s |
+| `wasm/single/` | anywhere else | about 35 s | about 110 s |
+
+Times are on an Apple M3 (single build measured in Node 22, V8).
+
+To get threads, serve the page with both headers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+```typescript
+import { initPvac, pvacMode } from '@0xio/pvac';
+
+const wasm = await initPvac();                  // mode: 'auto'
+pvacMode();                                     // 'threaded' or 'single'
+
+await initPvac({ mode: 'single' });             // force a build ('threaded' throws off isolation)
+await initPvac({ wasmBase: '/pvac/' });         // self-hosted copy of the wasm/ folder
+```
+
+Unbundled ESM (a CDN such as jsDelivr, or the files served as published) finds `wasm/` beside `dist/`. A bundler that moves the module does not copy `wasm/`: copy `node_modules/@0xio/pvac/wasm` to your public folder and pass `wasmBase`. On the single build, `threads` is ignored and `makeRangeProofParallel` proves serially.
+
 ## Modules
 
 | Module | Description |
@@ -37,7 +67,7 @@ npm install tweetnacl
 | `ProofWorker` | Web Worker offload so proofs don't freeze the UI |
 | `Groth16` | BN254 ZK proof generation and on-chain verification |
 
-With threads on an M3, an encrypt takes about 3 s and a decrypt about 10 s.
+With threads on an M3, an encrypt takes about 3 s and a decrypt about 10 s (see [Threaded and single builds](#threaded-and-single-builds)).
 
 ## Proof policy
 
@@ -256,8 +286,8 @@ Proofs take seconds. Keep them off the UI thread.
 ```typescript
 import { ProofWorker } from '@0xio/pvac';
 
-// Create worker (loads the pvac_rs.js glue and its WASM in a background thread)
-const worker = new ProofWorker('/wasm/pvac_rs.js');
+// Create worker (loads the bundled build in a background thread, or pass a pvac_rs.js glue URL)
+const worker = new ProofWorker();
 await worker.createContext(seed);
 
 // Encrypt
@@ -372,9 +402,9 @@ The secret key never leaves the context: there is no secret key export.
 
 - **Browser only**: Chrome, Firefox, Edge, Brave
 - WebAssembly support
-- SharedArrayBuffer + COOP/COEP headers (the bundled build is threaded)
+- Threads need SharedArrayBuffer and COOP/COEP headers; other pages get the single build
 - Several hundred MB of RAM while a proof runs (the generator table alone is about 84 MB)
-- WASM module is bundled (pvac-rs 0.3.0, 3.0MB)
+- WASM is bundled (pvac-rs 0.3.0: threaded 3.0 MB, single 0.6 MB)
 
 ## License
 
